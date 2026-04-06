@@ -775,6 +775,83 @@ body.light-mode .q-month-tag.missing { background: rgba(0,0,0,0.06); }
 
 <script>
 // ============================================================
+// ⚙️  구글 앱스 스크립트 연동 설정
+// ============================================================
+const APPS_SCRIPT_URL = 'https://script.google.com/a/macros/bspgbl.com/s/AKfycbx8hqkl4FSlRKgo2olaAvXm4hbmn2yZzgV1-kbOtfv4qc0yBJcuYHl66SkSpMrjFDqn-w/exec';
+
+// ── 로컬 캐시 (가장 먼저 선언) ──
+const _cache = {};
+
+// ── 캐시 기반 저장소 함수 (가장 먼저 선언) ──
+function _sGet(k)    { return _cache[k] ?? null; }
+function _sSet(k, v) { _cache[k] = v; _gasSet(k, v); }
+function _sDel(k)    { delete _cache[k]; _gasDel(k); }
+function _sKeys()    { return Object.keys(_cache); }
+
+// ── 연결 상태 표시 ──
+let _gasConnected = false;
+function _showSyncStatus(msg, color) {
+  const el = document.getElementById('sync-status');
+  if (el) { el.textContent = msg; el.style.color = color || 'var(--text3)'; }
+}
+
+// ── GAS API 호출 함수 ──
+async function _gasGet(key) {
+  try {
+    const url = key
+      ? `${APPS_SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`
+      : `${APPS_SCRIPT_URL}?action=get`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error);
+    return key ? json.value : json.data;
+  } catch(e) { console.warn('GAS get error:', e); return null; }
+}
+async function _gasSet(key, value) {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'set', key, value }) });
+    const json = await res.json();
+    if (json.ok) _showSyncStatus('☁️ 저장됨', 'var(--green)');
+    else         _showSyncStatus('⚠️ 저장 실패', 'var(--amber)');
+    setTimeout(() => _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--text3)'), 2000);
+    return json.ok;
+  } catch(e) { return false; }
+}
+async function _gasDel(key) {
+  try {
+    await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'delete', key }) });
+  } catch(e) {}
+}
+async function _gasDelAll() {
+  try {
+    await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'delete_all' }) });
+  } catch(e) {}
+}
+
+async function syncFromGAS() {
+  if (APPS_SCRIPT_URL === 'https://script.google.com/a/macros/bspgbl.com/s/AKfycbx8hqkl4FSlRKgo2olaAvXm4hbmn2yZzgV1-kbOtfv4qc0yBJcuYHl66SkSpMrjFDqn-w/exec') {
+    _showSyncStatus('⚠️ 앱스 스크립트 URL을 설정해주세요', 'var(--amber)'); return;
+  }
+  _showSyncStatus('🔄 데이터 불러오는 중...', 'var(--accent)');
+  try {
+    const allData = await _gasGet(null);
+    if (allData) {
+      Object.entries(allData).forEach(([k, v]) => { _cache[k] = v; });
+      _gasConnected = true;
+      _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--green)');
+      loadCurrentMonthData();
+      MONTH_TAB_PAGES.forEach(pid => renderPageMonthTabs(pid));
+      refreshUploadMonthTabs();
+    } else {
+      _gasConnected = true;
+      _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--green)');
+    }
+  } catch(e) {
+    _showSyncStatus('❌ 연결 실패 — 오프라인 모드', 'var(--red)');
+  }
+}
+
+// ============================================================
 // THEME TOGGLE
 // ============================================================
 let isDark = false;
@@ -816,165 +893,37 @@ const pageNames = {
 };
 
 // ============================================================
-// ⚙️  구글 앱스 스크립트 연동 설정
-// ============================================================
-// 앱스 스크립트 배포 후 발급된 URL을 여기에 붙여넣으세요
-const APPS_SCRIPT_URL = 'https://script.google.com/a/macros/bspgbl.com/s/AKfycbx8hqkl4FSlRKgo2olaAvXm4hbmn2yZzgV1-kbOtfv4qc0yBJcuYHl66SkSpMrjFDqn-w/exec';
-
-// ── 연결 상태 표시 ──
-let _gasConnected = false;
-function _showSyncStatus(msg, color) {
-  const el = document.getElementById('sync-status');
-  if (el) { el.textContent = msg; el.style.color = color || 'var(--text3)'; }
-}
-
-// ── GAS API 호출 공통 함수 ──
-async function _gasGet(key) {
-  try {
-    const url = key
-      ? `${APPS_SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`
-      : `${APPS_SCRIPT_URL}?action=get`;
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error);
-    return key ? json.value : json.data;
-  } catch(e) {
-    console.warn('GAS get error:', e);
-    return null;
-  }
-}
-
-async function _gasSet(key, value) {
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'set', key, value })
-    });
-    const json = await res.json();
-    return json.ok;
-  } catch(e) {
-    console.warn('GAS set error:', e);
-    return false;
-  }
-}
-
-async function _gasDel(key) {
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete', key })
-    });
-    const json = await res.json();
-    return json.ok;
-  } catch(e) { return false; }
-}
-
-async function _gasKeys() {
-  try {
-    const res = await fetch(`${APPS_SCRIPT_URL}?action=keys`);
-    const json = await res.json();
-    return json.ok ? json.keys : [];
-  } catch(e) { return []; }
-}
-
-async function _gasDelAll() {
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete_all' })
-    });
-    const json = await res.json();
-    return json.ok;
-  } catch(e) { return false; }
-}
-
-// ── 로컬 캐시 (속도 향상 — GAS는 느리므로 캐시 필수) ──
-const _cache = {};
-
-// ============================================================
 // STORAGE HELPERS — Google Apps Script 연동
 // ============================================================
 function storageKey(year, month, type) {
   return `taxmgr_${year}_${String(month).padStart(2,'0')}_${type}`;
 }
-
 function saveMonthData(year, month, type, data) {
   const key = storageKey(year, month, type);
   const val = JSON.stringify(data);
-  _cache[key] = val;  // 캐시 즉시 저장
-  // 백그라운드로 GAS에 저장
-  _gasSet(key, val).then(ok => {
-    if (ok) _showSyncStatus('☁️ 저장됨', 'var(--green)');
-    else    _showSyncStatus('⚠️ 저장 실패 (오프라인?)', 'var(--amber)');
-    setTimeout(() => _showSyncStatus('☁️ 구글 드라이브 연동', 'var(--text3)'), 2000);
-  });
+  _cache[key] = val;
+  _gasSet(key, val);
 }
-
 function loadMonthData(year, month, type) {
   const key = storageKey(year, month, type);
-  if (_cache[key] !== undefined) {
-    try { return _cache[key] ? JSON.parse(_cache[key]) : null; }
-    catch(e) { return null; }
-  }
-  return null;
+  try { return _cache[key] ? JSON.parse(_cache[key]) : null; }
+  catch(e) { return null; }
 }
-
 function deleteMonthData(year, month, type) {
   const key = storageKey(year, month, type);
   delete _cache[key];
   _gasDel(key);
 }
-
 function getAllStoredKeys() {
   return Object.keys(_cache).filter(k =>
     k.startsWith('taxmgr_') && k !== 'taxmgr_corp_memo' && k !== 'taxmgr_theme' && k !== 'taxmgr_card_vat_excludes'
   );
 }
-
 function parseStorageKey(key) {
   const parts = key.replace('taxmgr_','').split('_');
   if (parts.length < 3) return null;
   return { year: parseInt(parts[0]), month: parseInt(parts[1]), type: parts.slice(2).join('_') };
 }
-
-// ── 앱 시작 시 GAS에서 전체 데이터 로드 ──
-async function syncFromGAS() {
-  if (APPS_SCRIPT_URL === 'https://script.google.com/a/macros/bspgbl.com/s/AKfycbx8hqkl4FSlRKgo2olaAvXm4hbmn2yZzgV1-kbOtfv4qc0yBJcuYHl66SkSpMrjFDqn-w/exec') {
-    _showSyncStatus('⚠️ 앱스 스크립트 URL을 설정해주세요', 'var(--amber)');
-    return;
-  }
-  _showSyncStatus('🔄 데이터 불러오는 중...', 'var(--accent)');
-  try {
-    const allData = await _gasGet(null);  // 전체 데이터
-    if (allData) {
-      Object.entries(allData).forEach(([k, v]) => { _cache[k] = v; });
-      _gasConnected = true;
-      _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--green)');
-      loadCurrentMonthData();
-      MONTH_TAB_PAGES.forEach(pid => renderPageMonthTabs(pid));
-      refreshUploadMonthTabs();
-    } else {
-      _showSyncStatus('⚠️ 데이터 없음 (첫 사용)', 'var(--text3)');
-      _gasConnected = true;
-    }
-  } catch(e) {
-    _showSyncStatus('❌ 연결 실패 — 오프라인 모드', 'var(--red)');
-  }
-}
-
-// ── 테마/메모/카드VAT 도 캐시 기반으로 ──
-function _sGet(k) {
-  return _cache[k] ?? null;
-}
-function _sSet(k, v) {
-  _cache[k] = v;
-  _gasSet(k, v);  // 백그라운드 동기화
-}
-function _sDel(k) {
-  delete _cache[k];
-  _gasDel(k);
-}
-function _sKeys() { return Object.keys(_cache); }
 
 // ============================================================
 // NAVIGATION
