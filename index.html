@@ -893,37 +893,87 @@ const pageNames = {
 };
 
 // ============================================================
-// STORAGE HELPERS — Google Apps Script 연동
+// STORAGE HELPERS — Google Apps Script 연동 (청크 분할 저장)
 // ============================================================
+const CHUNK_SIZE = 40000; // 40KB씩 분할
+
 function storageKey(year, month, type) {
   return `taxmgr_${year}_${String(month).padStart(2,'0')}_${type}`;
 }
-function saveMonthData(year, month, type, data) {
+
+async function saveMonthData(year, month, type, data) {
   const key = storageKey(year, month, type);
   const val = JSON.stringify(data);
   _cache[key] = val;
-  _gasSet(key, val);
+  if (val.length <= CHUNK_SIZE) {
+    _gasSet(key, val);
+    return;
+  }
+  // 청크 분할 저장
+  const totalChunks = Math.ceil(val.length / CHUNK_SIZE);
+  _gasSet(key, JSON.stringify({ __chunked: true, total: totalChunks }));
+  const promises = [];
+  for (let i = 0; i < totalChunks; i++) {
+    const chunk = val.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    _cache[key + `__chunk${i}`] = chunk;
+    promises.push(_gasSet(key + `__chunk${i}`, chunk));
+  }
+  Promise.all(promises);
 }
+
 function loadMonthData(year, month, type) {
   const key = storageKey(year, month, type);
-  try { return _cache[key] ? JSON.parse(_cache[key]) : null; }
-  catch(e) { return null; }
+  try {
+    const raw = _cache[key];
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.__chunked) {
+      let combined = '';
+      for (let i = 0; i < parsed.total; i++) {
+        const chunk = _cache[key + `__chunk${i}`];
+        if (!chunk) return null;
+        combined += chunk;
+      }
+      return JSON.parse(combined);
+    }
+    return parsed;
+  } catch(e) { return null; }
 }
+
 function deleteMonthData(year, month, type) {
   const key = storageKey(year, month, type);
+  try {
+    const meta = _cache[key];
+    if (meta) {
+      const parsed = JSON.parse(meta);
+      if (parsed && parsed.__chunked) {
+        for (let i = 0; i < parsed.total; i++) {
+          delete _cache[key + `__chunk${i}`];
+          _gasDel(key + `__chunk${i}`);
+        }
+      }
+    }
+  } catch(e) {}
   delete _cache[key];
   _gasDel(key);
 }
+
 function getAllStoredKeys() {
   return Object.keys(_cache).filter(k =>
-    k.startsWith('taxmgr_') && k !== 'taxmgr_corp_memo' && k !== 'taxmgr_theme' && k !== 'taxmgr_card_vat_excludes'
+    k.startsWith('taxmgr_') &&
+    !k.includes('__chunk') &&
+    k !== 'taxmgr_corp_memo' &&
+    k !== 'taxmgr_theme' &&
+    k !== 'taxmgr_card_vat_excludes'
   );
 }
+
 function parseStorageKey(key) {
   const parts = key.replace('taxmgr_','').split('_');
   if (parts.length < 3) return null;
   return { year: parseInt(parts[0]), month: parseInt(parts[1]), type: parts.slice(2).join('_') };
 }
+
 
 // ============================================================
 // NAVIGATION
