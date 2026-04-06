@@ -795,6 +795,13 @@ function _showSyncStatus(msg, color) {
   if (el) { el.textContent = msg; el.style.color = color || 'var(--text3)'; }
 }
 
+// ── GAS 요청 큐 (동시 요청 방지 — GAS는 동시 처리 못함) ──
+let _gasQueue = Promise.resolve();
+function _gasSetQueued(key, value) {
+  _gasQueue = _gasQueue.then(() => _gasSet(key, value));
+  return _gasQueue;
+}
+
 // ── GAS API 호출 함수 ──
 async function _gasGet(key) {
   try {
@@ -811,11 +818,9 @@ async function _gasSet(key, value) {
   try {
     const res = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'set', key, value }) });
     const json = await res.json();
-    if (json.ok) _showSyncStatus('☁️ 저장됨', 'var(--green)');
-    else         _showSyncStatus('⚠️ 저장 실패', 'var(--amber)');
-    setTimeout(() => _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--text3)'), 2000);
+    if (json.ok) _showSyncStatus('☁️ 저장 중...', 'var(--accent)');
     return json.ok;
-  } catch(e) { return false; }
+  } catch(e) { console.warn('GAS set error:', e); return false; }
 }
 async function _gasDel(key) {
   try {
@@ -906,19 +911,17 @@ async function saveMonthData(year, month, type, data) {
   const val = JSON.stringify(data);
   _cache[key] = val;
   if (val.length <= CHUNK_SIZE) {
-    _gasSet(key, val);
+    await _gasSetQueued(key, val);  // 큐에 넣어서 순서대로 저장
     return;
   }
   // 청크 분할 저장
   const totalChunks = Math.ceil(val.length / CHUNK_SIZE);
-  _gasSet(key, JSON.stringify({ __chunked: true, total: totalChunks }));
-  const promises = [];
+  await _gasSetQueued(key, JSON.stringify({ __chunked: true, total: totalChunks }));
   for (let i = 0; i < totalChunks; i++) {
     const chunk = val.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
     _cache[key + `__chunk${i}`] = chunk;
-    promises.push(_gasSet(key + `__chunk${i}`, chunk));
+    await _gasSetQueued(key + `__chunk${i}`, chunk);
   }
-  Promise.all(promises);
 }
 
 function loadMonthData(year, month, type) {
