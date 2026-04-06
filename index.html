@@ -829,7 +829,7 @@ async function _gasDelAll() {
 }
 
 async function syncFromGAS() {
-  if (APPS_SCRIPT_URL === 'https://script.google.com/a/macros/bspgbl.com/s/AKfycbx8hqkl4FSlRKgo2olaAvXm4hbmn2yZzgV1-kbOtfv4qc0yBJcuYHl66SkSpMrjFDqn-w/exec') {
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('여기에')) {
     _showSyncStatus('⚠️ 앱스 스크립트 URL을 설정해주세요', 'var(--amber)'); return;
   }
   _showSyncStatus('🔄 데이터 불러오는 중...', 'var(--accent)');
