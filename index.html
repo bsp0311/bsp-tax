@@ -1146,69 +1146,54 @@ function refreshCurrentMonth() {
 // ============================================================
 // SPLIT & SAVE BY DATE  (날짜 기준 자동 월 분리 저장)
 // ============================================================
-function splitAndSaveAll() {
+async function splitAndSaveAll() {
   const types = ['tax-sell','tax-buy','bank','card'];
-  const results = {};   // { 'YYYY-MM': { type: count } }
+  const results = {};
   let totalSaved = 0;
 
-  types.forEach(type => {
-    if (!state.rawData[type]) return;
-    // Save updated mapping first
+  _showSyncStatus('💾 저장 중...', 'var(--accent)');
+
+  for (const type of types) {
+    if (!state.rawData[type]) continue;
     const mapping = state.mapping[type];
     const headers = state.headers[type];
     const dataStart = state.rawData[type + '_dataStart'] || 1;
     const allRows = state.rawData[type];
-
-    // Determine date column index
     const dateLbl = mapping['date'];
     const dateIdx = dateLbl ? headers.findIndex(h => h.label === dateLbl) : -1;
 
-    // Group rows by year-month
     const groups = {};
     for (let i = dataStart; i < allRows.length; i++) {
       const row = allRows[i];
       if (!Array.isArray(row) || !row.some(c => c !== '' && c !== null && c !== undefined)) continue;
-
       let yr, mo;
       if (dateIdx >= 0) {
-        const rawDate = row[dateIdx];
-        const d = parseDate(rawDate);
-        if (d && !isNaN(d)) {
-          yr = d.getFullYear();
-          mo = d.getMonth() + 1;
-        }
+        const d = parseDate(row[dateIdx]);
+        if (d && !isNaN(d)) { yr = d.getFullYear(); mo = d.getMonth() + 1; }
       }
-      // Fallback: use current state month if date unreadable
       if (!yr) { yr = state.month.year; mo = state.month.month; }
-
       const key = `${yr}-${String(mo).padStart(2,'0')}`;
       if (!groups[key]) groups[key] = { year: yr, month: mo, rows: [] };
       groups[key].rows.push(row);
     }
 
-    // Save each group as a separate month entry
-    Object.values(groups).forEach(({ year, month, rows }) => {
+    for (const { year, month, rows } of Object.values(groups)) {
       const existing = loadMonthData(year, month, type) || {};
-      // Merge: prepend header row so dataStart = 1
       const headerRow = allRows[dataStart - 1] || [];
       const newData = {
         rows: [headerRow, ...rows],
-        headers: headers,
-        dataStart: 1,
-        mapping: mapping,
+        headers, dataStart: 1, mapping,
         savedAt: new Date().toISOString(),
         fileName: existing.fileName || `(자동분리 ${year}-${String(month).padStart(2,'0')})`
       };
-      saveMonthData(year, month, type, newData);
+      await saveMonthData(year, month, type, newData);  // ← await 추가
       totalSaved += rows.length;
-
       const ymKey = `${year}-${String(month).padStart(2,'0')}`;
       if (!results[ymKey]) results[ymKey] = {};
       results[ymKey][type] = (results[ymKey][type] || 0) + rows.length;
-    });
-  });
+    }
+  }
 
-  // Show result summary
   const typeLabel = { 'tax-sell':'매출세금계산서', 'tax-buy':'매입세금계산서', bank:'은행', card:'카드' };
   const resultEl = document.getElementById('split-result');
   if (Object.keys(results).length === 0) {
@@ -1225,8 +1210,8 @@ function splitAndSaveAll() {
     <strong>✅ 자동 분리 완료!</strong> 총 ${totalSaved}건을 ${Object.keys(results).length}개 월로 저장했습니다.
     <div style="margin-top:10px;">${rows}</div>
   </div>`;
+  _showSyncStatus('☁️ 구글 드라이브 연동됨', 'var(--green)');
 
-  // Reset upload UI
   types.forEach(type => {
     state.rawData[type] = null;
     state.headers[type] = [];
@@ -1235,8 +1220,6 @@ function splitAndSaveAll() {
   });
   document.getElementById('mapping-container').innerHTML = '';
   document.getElementById('process-btn').disabled = true;
-
-  // Refresh all tabs
   MONTH_TAB_PAGES.forEach(pid => renderPageMonthTabs(pid));
   loadCurrentMonthData();
 }
